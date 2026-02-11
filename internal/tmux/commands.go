@@ -92,6 +92,24 @@ func (cm *ControlMode) SendKeysLiteral(target, text string) error {
 	return err
 }
 
+// SendKeysBytes sends raw bytes exactly as keyboard input.
+// Uses send-keys -H to avoid command parsing issues with control bytes.
+func (cm *ControlMode) SendKeysBytes(target string, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+
+	// Older tmux versions may not support -H; fall back to literal mode.
+	if err := cm.sendKeysHex(target, data); err != nil {
+		if strings.Contains(err.Error(), "unknown flag -H") {
+			return cm.SendKeysLiteral(target, string(data))
+		}
+		return err
+	}
+
+	return nil
+}
+
 // SendKeysRaw sends key names without literal mode.
 func (cm *ControlMode) SendKeysRaw(target string, keys ...string) error {
 	var b strings.Builder
@@ -102,6 +120,29 @@ func (cm *ControlMode) SendKeysRaw(target string, keys ...string) error {
 	}
 	_, err := cm.Execute(b.String())
 	return err
+}
+
+func (cm *ControlMode) sendKeysHex(target string, data []byte) error {
+	const chunkSize = 128 // keep command length reasonable for large pastes
+
+	for start := 0; start < len(data); start += chunkSize {
+		end := start + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+
+		var b strings.Builder
+		fmt.Fprintf(&b, "send-keys -t '%s' -H", target)
+		for _, by := range data[start:end] {
+			fmt.Fprintf(&b, " %02x", by)
+		}
+
+		if _, err := cm.Execute(b.String()); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // CapturePaneAll captures the entire scrollback history of a session with ANSI escape codes.

@@ -283,6 +283,20 @@ function getOrCreateTerminal(agentName) {
   // This prevents a phantom cursor at (0,0) before the app takes control.
   terminal.write('\x1b[?25l');
 
+  // Some browsers treat Shift+Tab as focus traversal before terminal input
+  // handling kicks in. Capture it explicitly and send Backtab (CSI Z).
+  if (typeof terminal.attachCustomKeyEventHandler === 'function') {
+    terminal.attachCustomKeyEventHandler(function(ev) {
+      if (ev.key === 'Tab' && ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        sendBinary(0x02, agentName, new Uint8Array([0x1b, 0x5b, 0x5a]));
+        return true;
+      }
+      return false;
+    });
+  }
+
   // Keyboard input -> server via binary
   terminal.onData(function(data) {
     var payload = new TextEncoder().encode(data);
@@ -313,8 +327,11 @@ function showTerminal(agentName) {
   entry.wrapper.classList.add('active');
   placeholderEl.style.display = 'none';
 
-  // Fit after layout settles
-  requestAnimationFrame(function() { fitTerminal(entry); });
+  // Fit after layout settles, then focus for immediate typing
+  requestAnimationFrame(function() {
+    fitTerminal(entry);
+    entry.terminal.focus();
+  });
 }
 
 function hideAllTerminals() {
@@ -348,6 +365,31 @@ function parseBinaryMessage(buffer) {
   var payload = bytes.slice(nullIdx + 1);
 
   return { msgType: msgType, agentName: agentName, payload: payload };
+}
+
+function getViewportY(term) {
+  if (typeof term.getViewportY === 'function') {
+    return term.getViewportY();
+  }
+  if (term.buffer && term.buffer.active && typeof term.buffer.active.viewportY === 'number') {
+    return term.buffer.active.viewportY;
+  }
+  return 0;
+}
+
+function getBottomY(term) {
+  // ghostty-web exposes viewport position via getViewportY(), where 0 is bottom.
+  if (typeof term.getViewportY === 'function') {
+    return 0;
+  }
+  if (term.buffer && term.buffer.active && typeof term.buffer.active.baseY === 'number') {
+    return term.buffer.active.baseY;
+  }
+  return 0;
+}
+
+function isAtBottom(term, y) {
+  return Math.abs(y - getBottomY(term)) < 0.5;
 }
 
 // --- WebSocket ---
@@ -397,7 +439,16 @@ function handleBinaryMessage(buffer) {
     // Terminal output — write to the agent's terminal
     var entry = terminals.get(parsed.agentName);
     if (entry) {
+      var savedY = getViewportY(entry.terminal);
+      var atBottom = isAtBottom(entry.terminal, savedY);
       entry.terminal.write(parsed.payload);
+
+      // ghostty-web write() is synchronous, and rendering happens on the next
+      // animation frame. Restoring immediately avoids a visible "jump to bottom
+      // then back" flash while preserving sticky scroll.
+      if (!atBottom && typeof entry.terminal.scrollToLine === 'function') {
+        entry.terminal.scrollToLine(savedY);
+      }
     }
   }
 }
@@ -455,6 +506,10 @@ function handleJsonMessage(msg) {
 
     case 'send-prompt':
       // Acknowledgment of programmatic prompt send
+      break;
+
+    case 'error':
+      console.error('ws error:', msg.error || msg);
       break;
   }
 }
@@ -515,8 +570,12 @@ function selectAgent(name) {
   updateHeader();
   renderAgentList();
 
-  // Subscribe FIRST — pipe-pane must be active on the server before the
-  // terminal triggers a resize (which forces the app to redraw).
+  // Show terminal immediately so selection never appears "stuck" on placeholder.
+  // subscribe-output ack will still trigger a resize/redraw once streaming is active.
+  showTerminal(name);
+
+  // Activate streaming; subscribe-output ack will trigger a redraw/resize once
+  // pipe-pane is confirmed active on the server.
   send({ type: 'subscribe-output', agent: name });
 }
 

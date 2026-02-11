@@ -96,7 +96,9 @@ func handleBinaryMessage(c *Client, data []byte) {
 
 	switch msgType {
 	case BinaryKeyboardInput:
-		c.server.ctrl.SendKeysLiteral(agentName, string(payload))
+		if err := sendKeyboardPayload(c, agentName, payload); err != nil {
+			log.Printf("keyboard input %s error: %v", agentName, err)
+		}
 	case BinaryResize:
 		parts := strings.SplitN(string(payload), ":", 2)
 		if len(parts) != 2 {
@@ -114,6 +116,71 @@ func handleBinaryMessage(c *Client, data []byte) {
 	default:
 		log.Printf("unknown binary message type: 0x%02x", msgType)
 	}
+}
+
+func sendKeyboardPayload(c *Client, agentName string, payload []byte) error {
+	// Prefer tmux key names for known VT special-key sequences (e.g. Shift+Tab).
+	// Fall back to byte-exact injection for everything else.
+	if keyName, ok := tmuxKeyNameFromVT(payload); ok {
+		return c.server.ctrl.SendKeysRaw(agentName, keyName)
+	}
+	return c.server.ctrl.SendKeysBytes(agentName, payload)
+}
+
+func tmuxKeyNameFromVT(payload []byte) (string, bool) {
+	switch string(payload) {
+	case "\x1b[Z":
+		return "BTab", true
+	case "\x1b[A", "\x1bOA":
+		return "Up", true
+	case "\x1b[B", "\x1bOB":
+		return "Down", true
+	case "\x1b[C", "\x1bOC":
+		return "Right", true
+	case "\x1b[D", "\x1bOD":
+		return "Left", true
+	case "\x1b[H", "\x1bOH":
+		return "Home", true
+	case "\x1b[F", "\x1bOF":
+		return "End", true
+	case "\x1b[5~":
+		return "PgUp", true
+	case "\x1b[6~":
+		return "PgDn", true
+	case "\x1b[2~":
+		return "IC", true
+	case "\x1b[3~":
+		return "DC", true
+	case "\x1bOP":
+		return "F1", true
+	case "\x1bOQ":
+		return "F2", true
+	case "\x1bOR":
+		return "F3", true
+	case "\x1bOS":
+		return "F4", true
+	case "\x1b[15~":
+		return "F5", true
+	case "\x1b[17~":
+		return "F6", true
+	case "\x1b[18~":
+		return "F7", true
+	case "\x1b[19~":
+		return "F8", true
+	case "\x1b[20~":
+		return "F9", true
+	case "\x1b[21~":
+		return "F10", true
+	case "\x1b[23~":
+		return "F11", true
+	case "\x1b[24~":
+		return "F12", true
+	case "\x1b":
+		return "Escape", true
+	case "\x7f":
+		return "BSpace", true
+	}
+	return "", false
 }
 
 // makeBinaryFrame builds a binary frame: msgType + agentName + \0 + payload
