@@ -279,6 +279,10 @@ function getOrCreateTerminal(agentName) {
   outputWrapEl.appendChild(wrapper);
   terminal.open(wrapper);
 
+  // Hide the native cursor until the app positions it via escape sequences.
+  // This prevents a phantom cursor at (0,0) before the app takes control.
+  terminal.write('\x1b[?25l');
+
   // Keyboard input -> server via binary
   terminal.onData(function(data) {
     var payload = new TextEncoder().encode(data);
