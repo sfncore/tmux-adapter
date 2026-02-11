@@ -57,6 +57,23 @@ Live output follows as subsequent binary 0x01 frames.
 - Keyboard input flows directly through the terminal — no separate prompt bar
 - `ResizeObserver` + `onResize` keeps tmux pane dimensions in sync
 
+### Implemented UX Semantics
+
+- Selecting an agent shows/focuses its terminal immediately, then starts `subscribe-output`.
+- Subscribe output behavior:
+  - JSON ack: `{"type":"subscribe-output","ok":true}`
+  - Immediate binary snapshot frame (`0x01`) from `capture-pane`
+  - Then live binary stream frames (`0x01`) from `pipe-pane`
+- Scroll behavior:
+  - If user is at bottom, incoming output follows the stream.
+  - If user scrolls up, incoming output preserves viewport position (sticky scroll).
+  - If user starts typing while scrolled up, client jumps to bottom so typed input is visible.
+- Special keys:
+  - Browser terminal `onData` sends VT bytes.
+  - Server maps common VT sequences to tmux key names (`BTab`, arrows, Home/End, PgUp/PgDn, F1-F12, Escape, Backspace).
+  - Remaining bytes are sent byte-exact via `send-keys -H`.
+  - Frontend explicitly captures Shift+Tab and sends `ESC [ Z` to avoid browser focus traversal.
+
 ---
 
 ## Terminal Command

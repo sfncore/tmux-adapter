@@ -18,7 +18,7 @@ Single WebSocket connection per client:
 ws://localhost:{PORT}/ws
 ```
 
-All communication is JSON messages over this one connection. The client sends requests, the server sends responses and pushes events.
+Communication uses JSON text frames plus binary frames over this one connection.
 
 ## Message Format
 
@@ -34,6 +34,24 @@ Every message has a `type` field. Requests from the client include an `id` for c
 // server → client (unsolicited event)
 {"type": "agent-added", "agent": {...}}
 ```
+
+### Binary Frame Format
+
+Terminal I/O frames use:
+
+```
+msgType(1 byte) + agentName(utf8) + 0x00 + payload(bytes)
+```
+
+| Type | Direction | Meaning |
+|------|-----------|---------|
+| `0x01` | server → client | terminal output bytes |
+| `0x02` | client → server | keyboard input bytes |
+| `0x03` | client → server | resize payload (`"cols:rows"`) |
+
+Notes:
+- Keyboard `0x02` payload is interpreted as VT bytes. Known special-key sequences (e.g. `ESC [ Z`) are translated to tmux key names (`BTab`, arrows, Home/End, PgUp/PgDn, F1-F12). Unknown sequences fall back to byte-exact `send-keys -H`.
+- In the dashboard client, Shift+Tab is explicitly captured and sent as `ESC [ Z` to avoid browser focus traversal.
 
 ---
 
@@ -106,18 +124,20 @@ Error:
 
 ### subscribe-output
 
-Get an agent's full history and start streaming new output — in one atomic call. The server captures the full scrollback, activates streaming, then sends the history followed by live output events. Nothing is missed between the history snapshot and the first streaming event.
+Start output subscription (streaming by default).
 
 ```json
 {"id": "3", "type": "subscribe-output", "agent": "hq-mayor"}
 ```
 
-Response (includes full history):
+Response:
 ```json
-{"id": "3", "type": "subscribe-output", "ok": true, "history": "... full scrollback content ..."}
+{"id": "3", "type": "subscribe-output", "ok": true}
 ```
 
-After this response, the server pushes `output` events for this agent as new content arrives.
+After this response, the server sends binary `0x01` frames:
+1. Immediate snapshot frame (`capture-pane -p -e -S -`) for current pane state.
+2. Ongoing live frames from `pipe-pane`.
 
 To get history without subscribing, pass `"stream": false`:
 ```json
@@ -177,9 +197,9 @@ Response:
 
 ---
 
-## Server → Client Events
+## Server → Client JSON Events
 
-Pushed without a request. No `id` field. Only sent after the corresponding `subscribe-*` request.
+Pushed as JSON text frames without a request. No `id` field. Only sent after the corresponding `subscribe-*` request.
 
 ### agent-added
 
@@ -205,13 +225,7 @@ An agent's metadata has changed — typically when a human attaches to or detach
 {"type": "agent-updated", "agent": {"name": "hq-mayor", "role": "mayor", "runtime": "claude", "rig": null, "workDir": "/Users/me/gt/mayor/rig", "attached": true}}
 ```
 
-### output
-
-Streaming output from a subscribed agent.
-
-```json
-{"type": "output", "agent": "hq-mayor", "data": "new output bytes here"}
-```
+Terminal output is not sent as JSON. It is sent as binary `0x01` frames (see Binary Frame Format).
 
 ---
 
@@ -244,16 +258,21 @@ Clients see agents. Internally it's all tmux.
 - Hot-reload handling: when an agent hot-reloads (same session, process dies + restarts), emit `agent-removed` then `agent-added` with the same name in quick succession. No new event type needed.
 
 **Atomic history + subscribe:**
-- Capture full scrollback (`capture-pane -p -S -`)
 - Activate `pipe-pane -o` for streaming
-- Send history in the response, then stream `output` events
-- Because `pipe-pane` captures all new output from activation onward, and the scrollback capture includes everything up to that moment, there's no gap
+- Send JSON subscribe ack
+- Send immediate binary snapshot (`capture-pane -p -e -S -`) so idle sessions render immediately
+- Stream binary output frames from pipe-pane
 
 **Send prompt:**
 - NudgeSession sequence: `send-keys -l` → 500ms → `send-keys Escape` → 100ms → `send-keys Enter` (3x retry, 200ms backoff) → SIGWINCH wake dance
 - Per-agent serialization to prevent interleaving
 
+**Interactive keyboard path (`0x02`):**
+- Client sends VT bytes from terminal `onData`
+- Server maps known VT sequences to tmux key names (e.g. Shift+Tab, arrows, function keys)
+- Remaining bytes are delivered exactly via `send-keys -H` (fallback to `-l` if `-H` unavailable)
+
 **Output streaming:**
 - `pipe-pane -o` activated per-agent when first client subscribes
 - Deactivated when last client unsubscribes
-- Output bytes routed to all subscribed WebSocket clients for that agent
+- Output bytes routed to all subscribed WebSocket clients for that agent as binary `0x01` frames

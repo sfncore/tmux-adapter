@@ -18,7 +18,23 @@ websocat ws://localhost:8080/ws
 
 ## API
 
-All communication is JSON over a single WebSocket connection at `/ws`. Requests include an `id` for correlation; responses echo it back. Events are pushed without an `id`.
+The adapter uses a mixed JSON + binary protocol over one WebSocket connection at `/ws`:
+- JSON text frames for control flow (`subscribe-*`, `list-agents`, `send-prompt`)
+- Binary frames for terminal data (output, keyboard input, resize)
+
+Requests include an `id` for correlation; responses echo it back.
+
+### Binary Frame Format
+
+```
+msgType(1 byte) + agentName(utf8) + 0x00 + payload(bytes)
+```
+
+| Type | Direction | Meaning |
+|------|-----------|---------|
+| `0x01` | server → client | terminal output bytes |
+| `0x02` | client → server | keyboard input bytes |
+| `0x03` | client → server | resize payload (`"cols:rows"`) |
 
 ### List Agents
 
@@ -41,16 +57,18 @@ The adapter handles the full NudgeSession delivery sequence internally (literal 
 
 ### Subscribe to Agent Output
 
-Get full scrollback history and optionally stream new output in one atomic call:
+Start streaming output (default `stream=true`):
 
 ```json
 → {"id":"3", "type":"subscribe-output", "agent":"hq-mayor"}
-← {"id":"3", "type":"subscribe-output", "ok":true, "history":"... full scrollback ..."}
-← {"type":"output", "name":"hq-mayor", "data":"new output bytes"}
-← {"type":"output", "name":"hq-mayor", "data":"more bytes..."}
+← {"id":"3", "type":"subscribe-output", "ok":true}
 ```
 
-History-only (no streaming):
+After this JSON ack, the server sends:
+- a binary `0x01` snapshot frame with current pane content (so quiet/paused sessions are not blank)
+- then ongoing binary `0x01` live stream frames from `pipe-pane`
+
+History-only (no stream):
 
 ```json
 → {"id":"4", "type":"subscribe-output", "agent":"hq-mayor", "stream":false}
@@ -117,7 +135,7 @@ Clients ◄──ws──► tmux-adapter ◄──control mode──► tmux se
 
 - **Control mode**: one `tmux -C` connection handles all commands and receives `%sessions-changed` events for lifecycle tracking
 - **Agent detection**: reads `GT_ROLE`/`GT_RIG` env vars, checks `pane_current_command` against known runtimes, walks process descendants for shell-wrapped agents, handles version-as-argv[0] (e.g., Claude showing `2.1.38`)
-- **Output streaming**: `pipe-pane -o` activated per-agent on first subscriber, deactivated on last unsubscribe
+- **Output streaming**: `pipe-pane -o` activated per-agent on first subscriber, deactivated on last unsubscribe; each subscribe also sends an immediate `capture-pane` snapshot frame
 - **Send prompt**: full NudgeSession sequence with per-agent mutex to prevent interleaving
 
 ## Flags
