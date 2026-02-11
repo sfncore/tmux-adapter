@@ -299,6 +299,10 @@ function getOrCreateTerminal(agentName) {
 
   // Keyboard input -> server via binary
   terminal.onData(function(data) {
+    // If user starts typing while scrolled up, jump to live bottom so input is visible.
+    if (typeof terminal.scrollToBottom === 'function') {
+      terminal.scrollToBottom();
+    }
     var payload = new TextEncoder().encode(data);
     sendBinary(0x02, agentName, payload);
   });
