@@ -35,6 +35,7 @@ msgType(1 byte) + agentName(utf8) + 0x00 + payload(bytes)
 | `0x01` | server → client | terminal output bytes |
 | `0x02` | client → server | keyboard input bytes |
 | `0x03` | client → server | resize payload (`"cols:rows"`) |
+| `0x04` | client → server | file upload payload (`fileName + 0x00 + mimeType + 0x00 + fileBytes`) |
 
 ### List Agents
 
@@ -54,6 +55,17 @@ msgType(1 byte) + agentName(utf8) + 0x00 + payload(bytes)
 ```
 
 The adapter handles the full NudgeSession delivery sequence internally (literal mode, 500ms debounce, Escape, Enter with retry, SIGWINCH wake for detached sessions).
+
+### Upload + Paste Files
+
+Clients can drag/drop or paste files into an agent terminal by sending binary `0x04` frames.
+
+Behavior:
+- Max upload size is 8MB per file.
+- File bytes are transferred to the server and saved under `<agent workDir>/.tmux-adapter/uploads` (fallback: `/tmp/tmux-adapter/uploads/...`).
+- If the file is text-like and <= 256KB, the file contents are pasted into tmux.
+- Otherwise, the saved server-side file path is pasted into tmux.
+- The adapter also attempts to mirror the same pasted payload into the server's local clipboard (`pbcopy`, `wl-copy`, `xclip`, `xsel`; best effort).
 
 ### Subscribe to Agent Output
 

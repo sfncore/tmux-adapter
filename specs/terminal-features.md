@@ -43,6 +43,12 @@ messages (agent lifecycle, subscribe/unsubscribe).
 **Client → Server (binary):** `0x03 + agentName + \0 + "cols:rows"`
 - Terminal resize from ghostty-web `onResize` callback
 
+**Client → Server (binary):** `0x04 + agentName + \0 + fileName + \0 + mimeType + \0 + fileBytes`
+- File drag/drop or clipboard-file paste into the active terminal
+- Max file size: 8MB per upload
+- Server stores the file, copies paste payload to local clipboard (best effort), then pastes into tmux
+- Text-like files <= 256KB paste inline; larger/binary files paste the saved file path
+
 **subscribe-output response (JSON):**
 ```json
 {"id": "3", "type": "subscribe-output", "ok": true}
@@ -88,8 +94,14 @@ output, letting me do another command, etc. until I type the "exit" command.
 
 ## File Attachments
 
-Need to be able to attach a file, e.g. image via copy paste, that goes to the
-server-side.
+Implemented via binary `0x04` upload frames from the browser terminal:
+- Drag/drop onto terminal uploads files.
+- Clipboard file paste uploads files.
+- Files are saved server-side under `.tmux-adapter/uploads` in the agent workdir
+  (fallback under `/tmp/tmux-adapter/uploads`).
+- Payload pasted into tmux:
+  - text-like files (<=256KB): file contents
+  - otherwise: absolute path of saved file
 
 ## @file Mentions
 

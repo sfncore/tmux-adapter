@@ -40,6 +40,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("websocket accept: %v", err)
 		return
 	}
+	conn.SetReadLimit(int64(maxFileUploadBytes + 64*1024))
 
 	ctx, cancel := context.WithCancel(r.Context())
 	client := NewClient(conn, s, ctx, cancel)

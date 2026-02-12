@@ -3,6 +3,7 @@ package tmux
 import (
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"syscall"
@@ -120,6 +121,48 @@ func (cm *ControlMode) SendKeysRaw(target string, keys ...string) error {
 	}
 	_, err := cm.Execute(b.String())
 	return err
+}
+
+// LoadBufferFromFile loads bytes into tmux's paste buffer.
+// Uses -w when available so tmux can propagate to the system clipboard.
+func (cm *ControlMode) LoadBufferFromFile(path string) error {
+	_, err := cm.Execute(fmt.Sprintf("load-buffer -w %s", shellQuote(path)))
+	if err != nil && strings.Contains(err.Error(), "unknown flag -w") {
+		_, err = cm.Execute(fmt.Sprintf("load-buffer %s", shellQuote(path)))
+	}
+	return err
+}
+
+// PasteBuffer pastes the current tmux buffer into the target pane/session.
+func (cm *ControlMode) PasteBuffer(target string) error {
+	_, err := cm.Execute(fmt.Sprintf("paste-buffer -d -t '%s'", target))
+	return err
+}
+
+// PasteBytes loads data into tmux's buffer and pastes it into the target.
+func (cm *ControlMode) PasteBytes(target string, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+
+	f, err := os.CreateTemp("", "tmux-adapter-buffer-*")
+	if err != nil {
+		return fmt.Errorf("create temp buffer file: %w", err)
+	}
+	defer os.Remove(f.Name())
+
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return fmt.Errorf("write temp buffer file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close temp buffer file: %w", err)
+	}
+
+	if err := cm.LoadBufferFromFile(f.Name()); err != nil {
+		return err
+	}
+	return cm.PasteBuffer(target)
 }
 
 func (cm *ControlMode) sendKeysHex(target string, data []byte) error {

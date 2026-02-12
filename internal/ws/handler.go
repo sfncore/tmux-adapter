@@ -39,6 +39,7 @@ const (
 	BinaryTerminalOutput byte = 0x01 // server → client: terminal output
 	BinaryKeyboardInput  byte = 0x02 // client → server: keyboard input
 	BinaryResize         byte = 0x03 // client → server: resize
+	BinaryFileUpload     byte = 0x04 // client → server: file upload for paste
 )
 
 // Per-agent mutexes for send-prompt serialization.
@@ -113,6 +114,18 @@ func handleBinaryMessage(c *Client, data []byte) {
 		if err := c.server.ctrl.ResizePaneTo(agentName, cols, rows); err != nil {
 			log.Printf("resize %s error: %v", agentName, err)
 		}
+	case BinaryFileUpload:
+		payloadCopy := append([]byte(nil), payload...)
+		go func() {
+			lock := getNudgeLock(agentName)
+			lock.Lock()
+			defer lock.Unlock()
+
+			if err := handleBinaryFileUpload(c, agentName, payloadCopy); err != nil {
+				log.Printf("file upload %s error: %v", agentName, err)
+				c.sendError("", "file upload "+agentName+": "+err.Error())
+			}
+		}()
 	default:
 		log.Printf("unknown binary message type: 0x%02x", msgType)
 	}
