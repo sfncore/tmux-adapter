@@ -1021,23 +1021,13 @@ function send(obj) {
 }
 
 // --- Binary message handling ---
-var binaryFrameCount = 0;
-
 function handleBinaryMessage(buffer) {
   var parsed = parseBinaryMessage(buffer);
 
   var entry = terminals.get(parsed.agentName);
   if (!entry) return;
 
-  var frameNum = ++binaryFrameCount;
-  var isInitial = pendingInitialPaint.has(parsed.agentName);
-  var isResize = pendingResizePaint.has(parsed.agentName);
-
   if (parsed.msgType === BinaryTerminalSnapshot) {
-    console.log('[frame ' + frameNum + '] 0x05 SNAPSHOT ' + parsed.agentName +
-      ' payload=' + parsed.payload.length + 'B' +
-      ' pendingInitial=' + isInitial + ' pendingResize=' + isResize +
-      ' cols=' + entry.terminal.cols + ' rows=' + entry.terminal.rows);
     setTerminalHostVisibility(parsed.agentName, false);
     if (typeof entry.terminal.reset === 'function') {
       entry.terminal.reset();
@@ -1049,7 +1039,6 @@ function handleBinaryMessage(buffer) {
 
     requestAnimationFrame(function() {
       requestAnimationFrame(function() {
-        console.log('[frame ' + frameNum + '] 0x05 reveal rAF for ' + parsed.agentName);
         finishInitialPaint(parsed.agentName);
         finishResizePending(parsed.agentName);
         setTerminalHostVisibility(parsed.agentName, true);
@@ -1065,16 +1054,12 @@ function handleBinaryMessage(buffer) {
     return;
   }
 
-  if (isInitial) {
-    console.log('[frame ' + frameNum + '] 0x01 STREAM ' + parsed.agentName +
-      ' payload=' + parsed.payload.length + 'B → WRITE (hidden, pendingInitial)');
+  if (pendingInitialPaint.has(parsed.agentName)) {
     entry.terminal.write(parsed.payload);
     return;
   }
 
-  if (isResize) {
-    console.log('[frame ' + frameNum + '] 0x01 STREAM ' + parsed.agentName +
-      ' payload=' + parsed.payload.length + 'B → WRITE+REVEAL (pendingResize)');
+  if (pendingResizePaint.has(parsed.agentName)) {
     entry.terminal.write(parsed.payload);
     requestAnimationFrame(function() {
       requestAnimationFrame(function() {
@@ -1086,11 +1071,6 @@ function handleBinaryMessage(buffer) {
       });
     });
     return;
-  }
-
-  if (binaryFrameCount <= 50) {
-    console.log('[frame ' + frameNum + '] 0x01 STREAM ' + parsed.agentName +
-      ' payload=' + parsed.payload.length + 'B → normal write');
   }
 
   var savedY = getViewportY(entry.terminal);
@@ -1235,8 +1215,6 @@ function selectAgent(name) {
   }
 
   selectedAgent = name;
-  binaryFrameCount = 0;
-  console.log('=== selectAgent(' + name + ') ===');
   finishResizePending(name);
   startInitialPaint(name);
   updateHeader();
@@ -1246,13 +1224,7 @@ function selectAgent(name) {
   // subscribe-output is sent after we push current size to avoid bad initial wraps.
   showTerminal(name);
 
-  var entry = terminals.get(name);
-  if (entry) {
-    console.log('  terminal size: ' + entry.terminal.cols + 'x' + entry.terminal.rows);
-  }
-
   // Push size first, then request snapshot+stream at that geometry.
-  console.log('  calling subscribeOutputWithSizedSnapshot');
   subscribeOutputWithSizedSnapshot(name);
 
   if (isMobileLayout()) {

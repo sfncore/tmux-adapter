@@ -75,6 +75,8 @@ Mixed JSON + binary over a single WebSocket at `/ws`. JSON for control messages,
 
 - Gastown repo (cached): /Users/csells/code/cache/steveyegge/gastown
 - NTM repo (cached): /Users/csells/code/cache/Dicklesworthstone/ntm
+- ghostty-web repo (cached): /Users/csells/code/Cache/coder/ghostty-web
+- ghostty repo (cached): /Users/csells/code/Cache/ghostty-org/ghostty
 
 ## Working Style
 

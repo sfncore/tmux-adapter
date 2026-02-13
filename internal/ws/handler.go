@@ -376,49 +376,20 @@ func handleSubscribeOutput(c *Client, req Request) {
 			OK:   &okVal,
 		})
 
-		// Force a clean redraw BEFORE capturing. The preceding client resize
-		// triggered SIGWINCH, but the app may not have finished redrawing (or
-		// the resize happened before pipe-pane was active). The resize dance
-		// guarantees the app has repainted at the correct geometry.
-		log.Printf("subscribe-output(%s): forcing redraw before capture", req.Agent)
+		// Force a clean redraw. The resize dance triggers SIGWINCH, causing
+		// the app to repaint. pipe-pane captures all output in real-time.
+		log.Printf("subscribe-output(%s): forcing redraw", req.Agent)
 		c.server.ctrl.ForceRedraw(req.Agent)
-		time.Sleep(100 * time.Millisecond)
 
-		// Drain any pipe-pane bytes accumulated during the ForceRedraw —
-		// they contain intermediate redraws (shrunk + restored) that would
-		// duplicate the snapshot content if forwarded.
-	drain:
-		for {
-			select {
-			case _, ok := <-ch:
-				if !ok {
-					break drain
-				}
-			default:
-				break drain
-			}
-		}
+		// Let the app finish redrawing; pipe-pane buffers all output in ch.
+		time.Sleep(200 * time.Millisecond)
 
-		// Now capture the clean post-redraw screen.
-		scrollback, _ := c.server.ctrl.CapturePaneHistory(req.Agent)
-		visible, visErr := c.server.ctrl.CapturePaneVisible(req.Agent)
-		if visErr != nil {
-			log.Printf("subscribe-output(%s): capture visible snapshot error: %v", req.Agent, visErr)
-		}
-		log.Printf("subscribe-output(%s): scrollback=%d bytes, visible=%d bytes", req.Agent, len(scrollback), len(visible))
+		// Send a minimal 0x05 (clear screen) to trigger the client's reset+reveal.
+		// The actual content comes from pipe-pane data buffered in ch.
+		log.Printf("subscribe-output(%s): sending 0x05 clear-screen trigger", req.Agent)
+		c.SendBinary(makeBinaryFrame(BinaryTerminalSnapshot, req.Agent, []byte("\x1b[2J\x1b[H")))
 
-		refreshPayload := make([]byte, 0, len(scrollback)+len(visible)+1024)
-		if scrollback != "" {
-			refreshPayload = append(refreshPayload, []byte(scrollback)...)
-		}
-		refreshPayload = append(refreshPayload, []byte("\x1b[2J\x1b[H")...)
-		if visible != "" {
-			refreshPayload = append(refreshPayload, []byte(visible)...)
-		}
-		log.Printf("subscribe-output(%s): sending 0x05 snapshot, %d bytes total", req.Agent, len(refreshPayload))
-		c.SendBinary(makeBinaryFrame(BinaryTerminalSnapshot, req.Agent, refreshPayload))
-
-		// Stream raw bytes in background
+		// Stream raw bytes in background — immediately flushes buffered pipe-pane data.
 		go func() {
 			for rawBytes := range ch {
 				c.SendBinary(makeBinaryFrame(BinaryTerminalOutput, req.Agent, rawBytes))
