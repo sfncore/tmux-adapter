@@ -20,12 +20,18 @@ websocat ws://localhost:8080/ws
 
 ### Sample Dashboard
 
-The Gastown Dashboard lives in `samples/index.html` — a consumer of the WebSocket API, not part of the server. To run it, serve the repo root with any static file server:
+The Gastown Dashboard lives in `samples/index.html` — a consumer of the WebSocket API, not part of the server. To run it locally:
 
 ```bash
-python3 -m http.server
+# Terminal 1: start the adapter
+./tmux-adapter --gt-dir ~/gt --port 8080
+
+# Terminal 2: serve the repo root as static files
+python3 -m http.server 8000
 open http://localhost:8000/samples/index.html
 ```
+
+The sample hardcodes its WebSocket connection to `ws://localhost:8080/ws`. To test against a remote server, edit the `connect()` function in `samples/index.html` and change `localhost:8080` to your server's address (e.g. `myserver.example.com:8080`). You'll also need to start the adapter with `--allowed-origins "your-ui-host.example.com"` so the server accepts cross-origin WebSocket connections from the UI's origin.
 
 ## API
 
@@ -36,7 +42,7 @@ The adapter uses a mixed JSON + binary protocol over one WebSocket connection at
 Requests include an `id` for correlation; responses echo it back.
 
 Security notes:
-- Browser WebSocket upgrades enforce normal origin checks (no permissive bypass).
+- WebSocket upgrades are checked against `--allowed-origins` (default: `localhost:*`). Cross-origin clients must be explicitly allowed.
 - Optional auth token can be required via `--auth-token`; clients send `Authorization: Bearer <token>` or `?token=<token>`.
 
 ### Binary Frame Format
@@ -79,7 +85,8 @@ Behavior:
 - Max upload size is 8MB per file.
 - File bytes are transferred to the server and saved under `<agent workDir>/.tmux-adapter/uploads` (fallback: `/tmp/tmux-adapter/uploads/...`).
 - If the file is text-like and <= 256KB, the file contents are pasted into tmux.
-- Otherwise, a server-side file path is pasted into tmux (relative to the agent workdir when possible, absolute fallback otherwise).
+- Images (`image/*`) paste the absolute server-side path so that agents like Claude Code can read and render the image inline.
+- Other binary files paste a relative server-side path (relative to the agent workdir when possible, absolute fallback).
 - The adapter also attempts to mirror the same pasted payload into the server's local clipboard (`pbcopy`, `wl-copy`, `xclip`, `xsel`; best effort).
 
 ### Subscribe to Agent Output
@@ -172,6 +179,7 @@ Clients ◄──ws──► tmux-adapter ◄──control mode──► tmux se
 | `--gt-dir` | `~/gt` | Gastown town directory |
 | `--port` | `8080` | WebSocket server port |
 | `--auth-token` | `` | Optional WebSocket auth token |
+| `--allowed-origins` | `localhost:*` | Comma-separated origin patterns for WebSocket CORS |
 
 ## Health Endpoints
 

@@ -12,6 +12,7 @@ I'm Bob. I'm fun, smart, funny, and easy-going. I think Chris is amazing -- genu
 go build -o tmux-adapter .                          # build binary
 ./tmux-adapter --gt-dir ~/gt --port 8080             # run (requires tmux + gastown running)
 ./tmux-adapter --gt-dir ~/gt --auth-token SECRET     # run with auth
+./tmux-adapter --allowed-origins "myhost.example.com" # run with cross-origin UI
 ```
 
 ## Test & Lint

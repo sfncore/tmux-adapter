@@ -9,52 +9,31 @@ with zero framework dependencies.
 
 ## 1. Overview & Motivation
 
-`samples/index.html` (the Gastown Dashboard sample app) mixes two concerns:
+The terminal hosting logic that any client embedding ghostty-web terminals over
+the tmux-adapter binary protocol needs has been extracted into a
+`<tmux-adapter-web>` custom element:
 
-1. **Gastown Dashboard app** — agent list sidebar, mobile drawer, WebSocket
-   connection management, agent lifecycle UI, connection status indicator.
+- Custom fit logic with minimum 80-column enforcement via `scaleX` transform
+- Flicker-free resize (hide during reflow, reveal on repaint or timeout)
+- Drag-drop and clipboard-paste file upload with binary `0x04` framing
+- Sticky scroll preservation (stay at bottom, or hold position while output streams)
+- Initial-paint visibility gating (hidden until first snapshot renders, then auto-focus)
+- Shift+Tab capture (prevent browser focus traversal, send CSI Z)
 
-2. **Terminal hosting** — ~200 lines of non-trivial logic that any app embedding
-   ghostty-web terminals over the tmux-adapter binary protocol needs:
-   - Custom fit logic with minimum 80-column enforcement via `scaleX` transform
-   - Flicker-free resize (hide during reflow, reveal on repaint or timeout)
-   - Drag-drop and clipboard-paste file upload with binary `0x04` framing
-   - Sticky scroll preservation (stay at bottom, or hold position while output streams)
-   - Initial-paint visibility gating (hide until first snapshot renders)
-   - Shift+Tab capture (prevent browser focus traversal, send CSI Z)
+The Gastown Dashboard sample (`samples/index.html`) is a consumer of this
+component — it handles agent lifecycle UI, WebSocket connection management,
+sidebar, and mobile drawer, while the terminal hosting complexity lives entirely
+inside `<tmux-adapter-web>`.
 
-This terminal hosting logic is **not dashboard-specific**. Any client embedding
-ghostty-web terminals over the adapter protocol needs all of it. Extracting it
-into a `<tmux-adapter-web>` custom element lets the dashboard shrink from ~800
-lines of JS to ~20 lines of event wiring, and lets other consumers (monitoring
-tools, embedded views, CLI web UIs) reuse the same battle-tested terminal host.
+The sample connects to `ws://localhost:8080/ws` by default. The Go server
+accepts `localhost:*` origins by default; for cross-machine deployments, use
+`--allowed-origins` on the server and update the WebSocket URL in the sample.
 
 Each terminal is conceptually a UI component — one element per agent. The DOM
 is the pool. Showing an agent means the element exists (or is visible); removing
 an agent means removing the element. Frameworks already know how to manage this:
 `v-if` in Vue, conditional rendering in React, `{#if}` in Svelte, or plain
 `appendChild`/`removeChild` in vanilla JS.
-
-### What Gets Extracted
-
-| Current location | Responsibility | Destination |
-|-----------------|----------------|-------------|
-| CSS lines 187–220 | `.terminal-wrapper`, `.terminal-host`, drag overlay | `<tmux-adapter-web>` internal styles |
-| JS lines 440–448 | Binary protocol constants | `protocol.js` |
-| JS lines 462–520 | Resize pending/reveal state machine | `<tmux-adapter-web>` internals |
-| JS lines 578–631 | `fitTerminal()`, `getTerminalScreen()`, `ResizeObserver` | `<tmux-adapter-web>` internals |
-| JS lines 634–800 | Terminal creation, show/hide, file transfer handlers | `<tmux-adapter-web>` internals |
-| JS lines 802–826 | `sendBinary()`, `parseBinaryMessage()` | `protocol.js` |
-| JS lines 828–951 | Scroll preservation, binary output handling | `<tmux-adapter-web>` internals |
-
-### What Stays in the Dashboard
-
-- All sidebar/mobile drawer HTML, CSS, and JS
-- `connect()`, `send()`, JSON message routing (`handleJsonMessage`)
-- Agent list rendering, selection, header updates
-- Connection status UI
-- WebSocket reconnect logic
-- Creating/removing `<tmux-adapter-web>` elements in response to agent lifecycle
 
 ---
 
@@ -462,92 +441,22 @@ registration can import `tmux-adapter-web.js` directly.
 
 ## 6. Consumer Integration
 
-### Before: `index.html` Today (~800 lines of JS)
+See `samples/index.html` for a complete working example. The key wiring is
+minimal — the consumer listens for events from `<tmux-adapter-web>` elements
+and forwards them over the WebSocket, and routes incoming binary frames to the
+appropriate element's `write()` method.
 
-The dashboard manages terminal creation, fit logic, resize debouncing, file
-upload encoding, scroll preservation, binary protocol framing, terminal pooling,
-and all the visibility state machines inline alongside the agent UI code.
+| Concern | Consumer responsibility |
+|---------|----------------------|
+| Terminal creation + lifecycle | `createElement` / `.remove()` |
+| Custom fit + scaleX | Handled by element |
+| Resize debounce + flicker prevention | Handled by element |
+| File upload encoding + drag/drop | Listen for `file-upload` event, send binary frame |
+| Scroll preservation | Handled by element |
+| Binary framing | `import { encodeBinaryFrame, decodeBinaryFrame }` |
+| Terminal pooling | DOM is the pool — toggle `display` or add/remove elements |
 
-### After: `index.html` Refactored
-
-```html
-<script type="module">
-import { init } from 'https://cdn.jsdelivr.net/npm/ghostty-web/+esm';
-import { decodeBinaryFrame, BinaryMsgType } from './tmux-adapter-web/index.js';
-
-await init();
-
-// --- Terminal event wiring (applies to any <tmux-adapter-web> element) ---
-document.addEventListener('terminal-input', (e) => {
-  sendBinary(0x02, e.detail.name, e.detail.data);
-});
-
-document.addEventListener('terminal-resize', (e) => {
-  var payload = textEncoder.encode(e.detail.cols + ':' + e.detail.rows);
-  sendBinary(0x03, e.detail.name, payload);
-});
-
-document.addEventListener('file-upload', (e) => {
-  sendBinary(0x04, e.detail.name, e.detail.payload);
-});
-
-// --- Binary output from server → find the right element and write ---
-function handleBinaryMessage(buffer) {
-  var parsed = decodeBinaryFrame(buffer);
-  if (parsed.msgType === BinaryMsgType.TerminalOutput) {
-    var el = document.querySelector(
-      'tmux-adapter-web[name="' + CSS.escape(parsed.agentName) + '"]'
-    );
-    if (el) el.write(parsed.payload);
-  }
-}
-
-// --- Agent selection ---
-function selectAgent(name) {
-  // Hide current terminal, show new one
-  outputWrapEl.querySelectorAll('tmux-adapter-web').forEach(function(el) {
-    el.style.display = 'none';
-  });
-
-  var el = outputWrapEl.querySelector(
-    'tmux-adapter-web[name="' + CSS.escape(name) + '"]'
-  );
-  if (!el) {
-    el = document.createElement('tmux-adapter-web');
-    el.setAttribute('name', name);
-    outputWrapEl.appendChild(el);
-  }
-  el.style.display = '';
-  el.focus();
-
-  send({ type: 'subscribe-output', agent: name });
-}
-
-function onAgentRemoved(name) {
-  var el = outputWrapEl.querySelector(
-    'tmux-adapter-web[name="' + CSS.escape(name) + '"]'
-  );
-  if (el) el.remove();   // disconnectedCallback handles cleanup
-}
-
-// ... rest is dashboard UI logic: sidebar, mobile drawer, connection, etc.
-</script>
-```
-
-### What Changed
-
-| Concern | Before | After |
-|---------|--------|-------|
-| Terminal creation + lifecycle | 60 lines inline | `createElement` / `.remove()` |
-| Custom fit + scaleX | 50 lines inline | Handled by element |
-| Resize debounce + flicker prevention | 60 lines inline | Handled by element |
-| File upload encoding + drag/drop | 75 lines inline | `file-upload` event |
-| Scroll preservation | 30 lines inline | Handled by element |
-| Binary framing | 25 lines inline | `import { decodeBinaryFrame }` |
-| Terminal pooling | 30 lines of Map management | DOM is the pool |
-| **Total terminal logic in dashboard** | **~330 lines** | **~30 lines** |
-
-The dashboard keeps full control over transport (WebSocket), agent lifecycle
+The consumer keeps full control over transport (WebSocket), agent lifecycle
 (JSON messages), and UI (sidebar, header, mobile drawer). The terminal hosting
 complexity lives entirely inside `<tmux-adapter-web>`.
 
