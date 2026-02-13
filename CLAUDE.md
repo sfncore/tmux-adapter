@@ -58,9 +58,9 @@ main.go → adapter.New() → wires everything together
                 │
                 ├── internal/ws/file_upload.go  Binary 0x04 handling: save file, paste path/contents into tmux
                 │
-                ├── web/tmux-adapter-web/       Reusable terminal web component (consumed via file path)
+                ├── web/tmux-adapter-web/       Reusable terminal web component (embedded, served at /tmux-adapter-web/)
                 │
-                └── samples/index.html          Gastown Dashboard sample app (not served by Go binary)
+                └── samples/index.html          Gastown Dashboard sample (imports component from adapter server)
 ```
 
 ### Key data flows

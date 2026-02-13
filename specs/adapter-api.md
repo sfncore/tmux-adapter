@@ -231,6 +231,18 @@ Terminal output is not sent as JSON. It is sent as binary `0x01` frames (see Bin
 
 ---
 
+## HTTP Endpoints
+
+In addition to the WebSocket at `/ws`, the adapter serves:
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /tmux-adapter-web/*` | Embedded `<tmux-adapter-web>` web component files (CORS-enabled). The component is baked into the binary via `go:embed` — the adapter is its own CDN. |
+| `GET /healthz` | Static process liveness check (`{"ok":true}`) |
+| `GET /readyz` | tmux control mode readiness check (`200` on success, `503` with error) |
+
+---
+
 ## Internal Architecture
 
 Clients see agents. Internally it's all tmux.
@@ -239,9 +251,10 @@ Clients see agents. Internally it's all tmux.
 ┌─────────────┐         ┌──────────────────┐         ┌────────────┐
 │   Clients   │◄──ws──►│  Tmux Adapter     │◄──────►│ tmux server│
 │  (any lang) │         │                  │         │            │
-│             │         │  control mode ────────────►│ sessions   │
-│             │         │  pipe-pane (per agent) ───►│ panes      │
-└─────────────┘         └──────────────────┘         └────────────┘
+│             │  http   │  control mode ────────────►│ sessions   │
+│             │◄───────►│  pipe-pane (per agent) ───►│ panes      │
+└─────────────┘         │  /tmux-adapter-web/ (embed)│            │
+                        └──────────────────┘         └────────────┘
 ```
 
 **Control mode connection:**

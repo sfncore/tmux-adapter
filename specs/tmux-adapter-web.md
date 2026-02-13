@@ -20,14 +20,17 @@ the tmux-adapter binary protocol needs has been extracted into a
 - Initial-paint visibility gating (hidden until first snapshot renders, then auto-focus)
 - Shift+Tab capture (prevent browser focus traversal, send CSI Z)
 
-The Gastown Dashboard sample (`samples/index.html`) is a consumer of this
-component — it handles agent lifecycle UI, WebSocket connection management,
+The Gastown Dashboard sample (`samples/index.html`) is a consumer of
+this component — it handles agent lifecycle UI, WebSocket connection management,
 sidebar, and mobile drawer, while the terminal hosting complexity lives entirely
 inside `<tmux-adapter-web>`.
 
-The sample connects to `ws://localhost:8080/ws` by default. The Go server
-accepts `localhost:*` origins by default; for cross-machine deployments, use
-`--allowed-origins` on the server and update the WebSocket URL in the sample.
+The adapter embeds the component files via `go:embed` and serves them at
+`/tmux-adapter-web/`. Consumers import directly from the adapter — no local file
+paths needed. The sample uses `?adapter=host:port` to control both the WebSocket
+connection and the component import origin (default: `localhost:8080`). The Go
+server accepts `localhost:*` origins by default; for cross-machine deployments,
+use `--allowed-origins` on the server.
 
 Each terminal is conceptually a UI component — one element per agent. The DOM
 is the pool. Showing an agent means the element exists (or is visible); removing
@@ -49,14 +52,15 @@ tmux-adapter/
 │   └── ws/
 ├── go.mod
 ├── web/
-│   └── tmux-adapter-web/     # Reusable terminal web component
+│   ├── embed.go              # go:embed directive — bakes component into the binary
+│   └── tmux-adapter-web/     # Reusable terminal web component (served at /tmux-adapter-web/)
 │       ├── tmux-adapter-web.js  # Custom element definition (main entry)
 │       ├── protocol.js       # Binary frame encode/decode (standalone export)
 │       ├── fit.js            # Custom fit logic (min-cols + scaleX)
 │       ├── file-transfer.js  # Drag-drop + paste upload wiring
 │       └── index.js          # Barrel: auto-registers element, re-exports protocol
 ├── samples/
-│   └── index.html            # Gastown Dashboard sample app (not served by Go binary)
+│   └── index.html            # Gastown Dashboard sample (imports component from adapter)
 ├── specs/
 ├── Makefile
 └── README.md
@@ -70,15 +74,17 @@ version coordination overhead while keeping concerns cleanly separated.
 
 ### Why not npm?
 
-No build step, no bundler, no registry. Consumers import directly:
+No build step, no bundler, no registry. The adapter embeds the component and
+serves it — consumers import directly from the running server:
 
 ```js
-import './tmux-adapter-web/index.js';
+const { decodeBinaryFrame, encodeBinaryFrame, BinaryMsgType } =
+  await import('http://your-adapter:8080/tmux-adapter-web/index.js');
 // <tmux-adapter-web> is now registered and ready to use
 ```
 
-For CDN-served deployments, the directory is self-contained and can be hosted
-as static files alongside `index.html`.
+The component version is always in sync with the server's binary protocol —
+no version coordination needed.
 
 ---
 
@@ -194,7 +200,7 @@ The element works everywhere custom elements work — which is everywhere.
 <tmux-adapter-web id="term" name="hq-mayor"></tmux-adapter-web>
 
 <script type="module">
-import './tmux-adapter-web/index.js';
+const { encodeBinaryFrame } = await import('http://your-adapter:8080/tmux-adapter-web/index.js');
 
 const el = document.getElementById('term');
 el.addEventListener('terminal-input', (e) => {
@@ -261,7 +267,7 @@ terminal UI (e.g., a headless Node.js client):
 
 ```js
 import { encodeBinaryFrame, decodeBinaryFrame, BinaryMsgType }
-  from './tmux-adapter-web/protocol.js';
+  from 'http://your-adapter:8080/tmux-adapter-web/protocol.js';
 
 // Encode
 const frame = encodeBinaryFrame(BinaryMsgType.KeyboardInput, 'agent-1', inputBytes);
@@ -441,10 +447,13 @@ registration can import `tmux-adapter-web.js` directly.
 
 ## 6. Consumer Integration
 
-See `samples/index.html` for a complete working example. The key wiring is
-minimal — the consumer listens for events from `<tmux-adapter-web>` elements
-and forwards them over the WebSocket, and routes incoming binary frames to the
-appropriate element's `write()` method.
+See `samples/index.html` for a complete working example. The sample uses
+`?adapter=host:port` to dynamically import the component from the adapter and
+connect the WebSocket — one parameter controls everything.
+
+The key wiring is minimal — the consumer listens for events from
+`<tmux-adapter-web>` elements and forwards them over the WebSocket, and routes
+incoming binary frames to the appropriate element's `write()` method.
 
 | Concern | Consumer responsibility |
 |---------|----------------------|

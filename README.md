@@ -20,18 +20,24 @@ websocat ws://localhost:8080/ws
 
 ### Sample Dashboard
 
-The Gastown Dashboard lives in `samples/index.html` — a consumer of the WebSocket API, not part of the server. To run it locally:
+The Gastown Dashboard lives in `samples/index.html` — a consumer of the WebSocket API, not part of the server. The adapter serves the `<tmux-adapter-web>` web component at `/tmux-adapter-web/`, so the sample (or any consumer) imports it directly from the adapter — no local file paths needed.
 
 ```bash
 # Terminal 1: start the adapter
 ./tmux-adapter --gt-dir ~/gt --port 8080
 
-# Terminal 2: serve the repo root as static files
-python3 -m http.server 8000
-open http://localhost:8000/samples/index.html
+# Terminal 2: serve the sample
+python3 -m http.server 8000 --directory samples
+open http://localhost:8000
 ```
 
-The sample hardcodes its WebSocket connection to `ws://localhost:8080/ws`. To test against a remote server, edit the `connect()` function in `samples/index.html` and change `localhost:8080` to your server's address (e.g. `myserver.example.com:8080`). You'll also need to start the adapter with `--allowed-origins "your-ui-host.example.com"` so the server accepts cross-origin WebSocket connections from the UI's origin.
+The sample connects to `localhost:8080` by default. To point at a different adapter (e.g. via ngrok), pass `?adapter=`:
+
+```
+http://localhost:8000/?adapter=abc123.ngrok-free.app:8080
+```
+
+The `?adapter=` parameter controls both the WebSocket connection and the component import origin. If the adapter is behind TLS, the sample auto-upgrades to `wss://` and `https://`. You'll also need to start the adapter with `--allowed-origins "your-ui-host.example.com"` so the server accepts cross-origin connections from the UI's origin.
 
 ## API
 
@@ -164,9 +170,12 @@ Only agents with a live process are exposed — zombie sessions are filtered out
 ```
 Clients ◄──ws──► tmux-adapter ◄──control mode──► tmux server
                       │
-                      └──pipe-pane (per agent)──► output files
+                      ├──pipe-pane (per agent)──► output files
+                      │
+                      └──/tmux-adapter-web/ ──► embedded web component (go:embed)
 ```
 
+- **Component serving**: the `<tmux-adapter-web>` web component is embedded in the binary via `go:embed` and served at `/tmux-adapter-web/` with CORS headers. Consumers import directly from the adapter — the server is its own CDN.
 - **Control mode**: one `tmux -C` connection handles all commands and receives `%sessions-changed` events for lifecycle tracking
 - **Agent detection**: reads `GT_ROLE`/`GT_RIG` env vars, checks `pane_current_command` against known runtimes, walks process descendants for shell-wrapped agents, handles version-as-argv[0] (e.g., Claude showing `2.1.38`)
 - **Output streaming**: `pipe-pane -o` activated per-agent on first subscriber, deactivated on last unsubscribe; each subscribe also sends an immediate `capture-pane` snapshot frame
@@ -181,8 +190,9 @@ Clients ◄──ws──► tmux-adapter ◄──control mode──► tmux se
 | `--auth-token` | `` | Optional WebSocket auth token |
 | `--allowed-origins` | `localhost:*` | Comma-separated origin patterns for WebSocket CORS |
 
-## Health Endpoints
+## HTTP Endpoints
 
+- `GET /tmux-adapter-web/*` -> embedded web component files (CORS-enabled)
 - `GET /healthz` -> static process liveness (`{"ok":true}`)
 - `GET /readyz` -> tmux control mode readiness check (`200` on success, `503` with error on failure)
 

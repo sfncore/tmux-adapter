@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/gastownhall/tmux-adapter/internal/agents"
 	"github.com/gastownhall/tmux-adapter/internal/tmux"
 	"github.com/gastownhall/tmux-adapter/internal/ws"
+	"github.com/gastownhall/tmux-adapter/web"
 )
 
 // Adapter wires together tmux control mode, agent registry, pipe-pane streaming,
@@ -71,6 +73,12 @@ func (a *Adapter) Start() error {
 	mux.HandleFunc("/healthz", a.handleHealth)
 	mux.HandleFunc("/readyz", a.handleReady)
 	mux.Handle("/ws", a.wsSrv)
+
+	// Serve embedded web component files at /tmux-adapter-web/
+	componentFS, _ := fs.Sub(web.ComponentFiles, "tmux-adapter-web")
+	mux.Handle("/tmux-adapter-web/", corsHandler(
+		http.StripPrefix("/tmux-adapter-web/", http.FileServer(http.FS(componentFS))),
+	))
 
 	a.httpSrv = &http.Server{
 		Addr:    fmt.Sprintf(":%d", a.port),
@@ -143,6 +151,13 @@ func (a *Adapter) handleReady(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func corsHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload map[string]any) {

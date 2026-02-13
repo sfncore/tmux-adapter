@@ -415,8 +415,11 @@
 
 <script type="module">
 import { init } from 'ghostty-web';
-import { decodeBinaryFrame, encodeBinaryFrame, BinaryMsgType } from '../web/tmux-adapter-web/index.js';
 await init();
+
+var adapterHost = new URLSearchParams(location.search).get('adapter') || 'localhost:8080';
+var adapterOrigin = (location.protocol === 'https:' ? 'https://' : 'http://') + adapterHost;
+var { decodeBinaryFrame, encodeBinaryFrame, BinaryMsgType } = await import(adapterOrigin + '/tmux-adapter-web/index.js');
 
 // --- State ---
 var agents = new Map();       // name -> agent object
@@ -606,7 +609,7 @@ function hideAllTerminals() {
 // --- WebSocket ---
 function connect() {
   var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  var wsURL = new URL(proto + '//localhost:8080/ws');
+  var wsURL = new URL(proto + '//' + adapterHost + '/ws');
   var token = new URLSearchParams(location.search).get('token');
   if (token) {
     wsURL.searchParams.set('token', token);
