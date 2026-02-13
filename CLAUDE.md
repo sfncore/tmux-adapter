@@ -81,6 +81,11 @@ Mixed JSON + binary over a single WebSocket at `/ws`. JSON for control messages,
 - ghostty-web repo (cached): /Users/csells/code/Cache/coder/ghostty-web
 - ghostty repo (cached): /Users/csells/code/Cache/ghostty-org/ghostty
 
+## Skills
+
+- `/ngrok-start` — expose the adapter + sample over the internet via ngrok free tier (two tunnels, one agent)
+- `/ngrok-stop` — kill ngrok and restore the config to clean state
+
 ## Working Style
 
 - Use teams of agents to execute work in parallel as much as possible

@@ -34,10 +34,31 @@ open http://localhost:8000
 The sample connects to `localhost:8080` by default. To point at a different adapter (e.g. via ngrok), pass `?adapter=`:
 
 ```
-http://localhost:8000/?adapter=abc123.ngrok-free.app:8080
+http://localhost:8000/?adapter=abc123.ngrok-free.app
 ```
 
 The `?adapter=` parameter controls both the WebSocket connection and the component import origin. If the adapter is behind TLS, the sample auto-upgrades to `wss://` and `https://`. You'll also need to start the adapter with `--allowed-origins "your-ui-host.example.com"` so the server accepts cross-origin connections from the UI's origin.
+
+### Testing Over the Internet (ngrok)
+
+To expose the adapter and sample over the internet using ngrok free tier:
+
+```bash
+# 1. Start the adapter with ngrok origins allowed
+./tmux-adapter --gt-dir ~/gt --port 8080 --allowed-origins "localhost:*,*.ngrok-free.app"
+
+# 2. Serve the sample
+python3 -m http.server 8000 --directory samples
+
+# 3. Start both ngrok tunnels (free tier: one agent, two tunnels via config)
+bash .claude/skills/ngrok-start/scripts/expose.sh 8080 8000
+```
+
+The script prints a ready-to-use URL combining the sample tunnel with `?adapter=` pointing at the service tunnel. To tear down:
+
+```bash
+pkill -f ngrok
+```
 
 ## API
 
