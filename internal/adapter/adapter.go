@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gastownhall/tmux-adapter/internal/agents"
+	"github.com/gastownhall/tmux-adapter/internal/rest"
 	"github.com/gastownhall/tmux-adapter/internal/tmux"
 	"github.com/gastownhall/tmux-adapter/internal/ws"
 	"github.com/gastownhall/tmux-adapter/web"
@@ -73,6 +74,9 @@ func (a *Adapter) Start() error {
 	mux.HandleFunc("/healthz", a.handleHealth)
 	mux.HandleFunc("/readyz", a.handleReady)
 	mux.Handle("/ws", a.wsSrv)
+
+	restHandler := rest.New(a.registry, a.ctrl, a.authToken)
+	restHandler.Register(mux)
 
 	// Serve embedded web component files at /tmux-adapter-web/
 	componentFS, _ := fs.Sub(web.ComponentFiles, "tmux-adapter-web")
