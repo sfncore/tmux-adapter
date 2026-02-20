@@ -4,5 +4,5 @@ tmp/server.log
 
 # Gas Town (added by gt)
 .runtime/
-.claude/commands/
+.claude/
 .logs/
