@@ -7,10 +7,10 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gastownhall/tmux-adapter/internal/agents"
+	"github.com/gastownhall/tmux-adapter/internal/nudge"
 )
 
 // Request is a message from a WebSocket client.
@@ -44,20 +44,6 @@ const (
 	BinaryTerminalSnapshot byte = 0x05 // server → client: terminal snapshot/refresh
 )
 
-// Per-agent mutexes for send-prompt serialization.
-var (
-	nudgeLocks   = make(map[string]*sync.Mutex)
-	nudgeLocksMu sync.Mutex
-)
-
-func getNudgeLock(agent string) *sync.Mutex {
-	nudgeLocksMu.Lock()
-	defer nudgeLocksMu.Unlock()
-	if _, ok := nudgeLocks[agent]; !ok {
-		nudgeLocks[agent] = &sync.Mutex{}
-	}
-	return nudgeLocks[agent]
-}
 
 // handleMessage routes a text request to the appropriate handler.
 func handleMessage(c *Client, req Request) {
@@ -120,7 +106,7 @@ func handleBinaryMessage(c *Client, data []byte) {
 	case BinaryFileUpload:
 		payloadCopy := append([]byte(nil), payload...)
 		go func() {
-			lock := getNudgeLock(agentName)
+			lock := nudge.GetLock(agentName)
 			lock.Lock()
 			defer lock.Unlock()
 
@@ -259,65 +245,20 @@ func handleSendPrompt(c *Client, req Request) {
 	}
 
 	// Serialize sends to this agent
-	lock := getNudgeLock(req.Agent)
+	lock := nudge.GetLock(req.Agent)
 
 	go func() {
 		lock.Lock()
 		defer lock.Unlock()
 
-		session := agent.Name
-
-		// 1. Send text in literal mode
-		if err := c.server.ctrl.SendKeysLiteral(session, req.Prompt); err != nil {
+		if err := nudge.Session(c.server.ctrl, agent, req.Prompt); err != nil {
 			ok := false
 			c.sendJSON(Response{ID: req.ID, Type: "send-prompt", OK: &ok, Error: err.Error()})
 			return
 		}
 
-		// 2. Wait 500ms for paste to complete
-		time.Sleep(500 * time.Millisecond)
-
-		// 3. Send Escape (for vim mode)
-		if err := c.server.ctrl.SendKeysRaw(session, "Escape"); err != nil {
-			ok := false
-			c.sendJSON(Response{ID: req.ID, Type: "send-prompt", OK: &ok, Error: "send Escape: " + err.Error()})
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-
-		// 4. Send Enter with 3x retry, 200ms backoff
-		var lastErr error
-		for attempt := 0; attempt < 3; attempt++ {
-			if attempt > 0 {
-				time.Sleep(200 * time.Millisecond)
-			}
-			if err := c.server.ctrl.SendKeysRaw(session, "Enter"); err != nil {
-				lastErr = err
-				continue
-			}
-
-			// 5. Wake detached sessions via SIGWINCH resize dance
-			if !agent.Attached {
-				if err := c.server.ctrl.ResizePane(session, "-1"); err != nil {
-					log.Printf("send-prompt(%s): wake shrink resize failed: %v", session, err)
-				}
-				time.Sleep(50 * time.Millisecond)
-				if err := c.server.ctrl.ResizePane(session, "+1"); err != nil {
-					log.Printf("send-prompt(%s): wake restore resize failed: %v", session, err)
-				}
-			}
-
-			ok := true
-			c.sendJSON(Response{ID: req.ID, Type: "send-prompt", OK: &ok})
-			return
-		}
-
-		ok := false
-		errMsg := "failed to send Enter after 3 attempts"
-		if lastErr != nil {
-			errMsg += ": " + lastErr.Error()
-		}
-		c.sendJSON(Response{ID: req.ID, Type: "send-prompt", OK: &ok, Error: errMsg})
+		ok := true
+		c.sendJSON(Response{ID: req.ID, Type: "send-prompt", OK: &ok})
 	}()
 }
 

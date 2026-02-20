@@ -1,15 +1,13 @@
-package ws
+package auth
 
 import (
 	"net/http/httptest"
 	"testing"
-
-	"github.com/gastownhall/tmux-adapter/internal/auth"
 )
 
 func TestIsAuthorizedRequestWithoutToken(t *testing.T) {
 	req := httptest.NewRequest("GET", "http://localhost:8080/ws", nil)
-	if !auth.IsAuthorizedRequest("", req) {
+	if !IsAuthorizedRequest("", req) {
 		t.Fatal("expected request without configured token to be authorized")
 	}
 }
@@ -18,7 +16,7 @@ func TestIsAuthorizedRequestBearerToken(t *testing.T) {
 	req := httptest.NewRequest("GET", "http://localhost:8080/ws", nil)
 	req.Header.Set("Authorization", "Bearer secret-token")
 
-	if !auth.IsAuthorizedRequest("secret-token", req) {
+	if !IsAuthorizedRequest("secret-token", req) {
 		t.Fatal("expected bearer token to authorize request")
 	}
 }
@@ -26,7 +24,7 @@ func TestIsAuthorizedRequestBearerToken(t *testing.T) {
 func TestIsAuthorizedRequestQueryToken(t *testing.T) {
 	req := httptest.NewRequest("GET", "http://localhost:8080/ws?token=secret-token", nil)
 
-	if !auth.IsAuthorizedRequest("secret-token", req) {
+	if !IsAuthorizedRequest("secret-token", req) {
 		t.Fatal("expected query token to authorize request")
 	}
 }
@@ -35,7 +33,7 @@ func TestIsAuthorizedRequestRejectsInvalidToken(t *testing.T) {
 	req := httptest.NewRequest("GET", "http://localhost:8080/ws?token=wrong", nil)
 	req.Header.Set("Authorization", "Bearer also-wrong")
 
-	if auth.IsAuthorizedRequest("secret-token", req) {
+	if IsAuthorizedRequest("secret-token", req) {
 		t.Fatal("expected invalid tokens to be rejected")
 	}
 }

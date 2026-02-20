@@ -2,7 +2,6 @@ package ws
 
 import (
 	"context"
-	"crypto/subtle"
 	"log"
 	"net/http"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/gastownhall/tmux-adapter/internal/agents"
+	"github.com/gastownhall/tmux-adapter/internal/auth"
 	"github.com/gastownhall/tmux-adapter/internal/tmux"
 )
 
@@ -39,7 +39,7 @@ func NewServer(registry *agents.Registry, pipeMgr *tmux.PipePaneManager, ctrl *t
 
 // ServeHTTP handles WebSocket upgrade requests at /ws.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !isAuthorizedRequest(s.authToken, r) {
+	if !auth.IsAuthorizedRequest(s.authToken, r) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -111,28 +111,3 @@ func (s *Server) CloseAll() {
 	}
 }
 
-func isAuthorizedRequest(expectedToken string, r *http.Request) bool {
-	token := strings.TrimSpace(expectedToken)
-	if token == "" {
-		return true
-	}
-
-	const bearerPrefix = "Bearer "
-	authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-	if strings.HasPrefix(authHeader, bearerPrefix) {
-		bearerToken := strings.TrimSpace(strings.TrimPrefix(authHeader, bearerPrefix))
-		if tokensEqual(token, bearerToken) {
-			return true
-		}
-	}
-
-	queryToken := strings.TrimSpace(r.URL.Query().Get("token"))
-	return tokensEqual(token, queryToken)
-}
-
-func tokensEqual(expected, actual string) bool {
-	if expected == "" || actual == "" {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(expected), []byte(actual)) == 1
-}
